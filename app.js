@@ -392,8 +392,8 @@ Status: <code>${statusReseller}</code>
 • 🔑 Menu Admin   : /admin
 • 🛡️ Admin Panel  : /helpadmin
 
-👨‍💻 <b>Pembuat:</b> @KACER
-🛠️ <b>Credit:</b> KACER × API POTATO
+👨‍💻 <b>Pembuat:</b> @one_zero2
+🛠️ <b>Credit:</b> API POTATO
 🔧 <b>Base:</b> FighterTunnel
 👥 <b>Pengguna BOT:</b> ${jumlahPengguna}
 ⏱️ <b>Latency:</b> ${latency} ms
