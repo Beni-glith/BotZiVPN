@@ -3232,7 +3232,8 @@ const dbAll = (query, params = []) => new Promise((resolve, reject) => {
 global.depositState = {};
 
 function isAdminUser(userId) {
-  return Array.isArray(adminIds) ? adminIds.includes(userId) : String(adminIds) === String(userId);
+  const normalizedUserId = String(userId);
+  return getAdminChatIds().some((adminId) => String(adminId) === normalizedUserId);
 }
 
 function getAdminChatIds() {
