@@ -49,7 +49,7 @@ if (!/^[a-zA-Z0-9-]+$/.test(username)) {
       const msg = `${d.message}
 
 📘 *TUTORIAL PASANG ZIVPN* 📲✨
-🔗 https://t.me/ARSIPKACER/2
+🔗 https://t.me/ARSIPKACER
 
 📥 *APK ZIVPN* 🚀
 🔗 https://play.google.com/store/apps/details?id=com.zi.zivpn
