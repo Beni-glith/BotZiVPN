@@ -3268,6 +3268,14 @@ function buildTopupAdminKeyboard(orderId, withViewProof = false) {
   return keyboard;
 }
 
+function getOrderIdFromCallback(ctx, prefix) {
+  const callbackData = ctx?.callbackQuery?.data || '';
+  if (!callbackData.startsWith(prefix)) return null;
+
+  const rawOrderId = callbackData.slice(prefix.length).trim();
+  return rawOrderId || null;
+}
+
 function getQrisPath() {
   const candidates = [QRIS_FILENAME, 'qris.jpg', 'qris.png'];
   for (const fileName of candidates) {
@@ -3460,11 +3468,11 @@ async function adminReject(ctx, orderId, reason) {
   const order = await dbGet(`SELECT * FROM topup_orders WHERE order_id = ?`, [orderId]);
   if (!order) {
     await ctx.reply('Order tidak ditemukan.');
-    return;
+    return false;
   }
   if (normalizeTopupStatus(order.status) !== 'PENDING') {
     await ctx.reply(`Order ${orderId} sudah berstatus ${order.status}.`);
-    return;
+    return false;
   }
 
   await dbRun(
@@ -3478,6 +3486,8 @@ async function adminReject(ctx, orderId, reason) {
   } catch (err) {
     logger.error('Gagal kirim notif reject ke user:', err.message);
   }
+
+  return true;
 }
 
 bot.action(/^topup_approve_(.+)$/, async (ctx) => {
@@ -3486,9 +3496,32 @@ bot.action(/^topup_approve_(.+)$/, async (ctx) => {
     return;
   }
 
-  const orderId = ctx.match[1];
+  const orderId = getOrderIdFromCallback(ctx, 'topup_approve_');
+  if (!orderId) {
+    await ctx.answerCbQuery('Order tidak valid.', { show_alert: true });
+    return;
+  }
+
   try {
-    await adminApprove(ctx, orderId);
+    const approved = await adminApprove(ctx, orderId);
+    if (!approved) {
+      await ctx.answerCbQuery('Order tidak bisa diproses.', { show_alert: true });
+      return;
+    }
+
+    if (ctx.callbackQuery?.message?.message_id && ctx.callbackQuery?.message?.chat?.id) {
+      try {
+        await ctx.telegram.editMessageReplyMarkup(
+          ctx.callbackQuery.message.chat.id,
+          ctx.callbackQuery.message.message_id,
+          undefined,
+          { inline_keyboard: [] }
+        );
+      } catch (editErr) {
+        logger.warn(`Gagal update tombol approve topup (${orderId}): ${editErr.message}`);
+      }
+    }
+
     await ctx.answerCbQuery('Order berhasil di-approve.');
   } catch (error) {
     logger.error(`Callback approve topup gagal (${orderId}):`, error.message);
@@ -3502,9 +3535,32 @@ bot.action(/^topup_reject_(.+)$/, async (ctx) => {
     return;
   }
 
-  const orderId = ctx.match[1];
+  const orderId = getOrderIdFromCallback(ctx, 'topup_reject_');
+  if (!orderId) {
+    await ctx.answerCbQuery('Order tidak valid.', { show_alert: true });
+    return;
+  }
+
   try {
-    await adminReject(ctx, orderId, 'Ditolak admin');
+    const rejected = await adminReject(ctx, orderId, 'Ditolak admin');
+    if (!rejected) {
+      await ctx.answerCbQuery('Order tidak bisa diproses.', { show_alert: true });
+      return;
+    }
+
+    if (ctx.callbackQuery?.message?.message_id && ctx.callbackQuery?.message?.chat?.id) {
+      try {
+        await ctx.telegram.editMessageReplyMarkup(
+          ctx.callbackQuery.message.chat.id,
+          ctx.callbackQuery.message.message_id,
+          undefined,
+          { inline_keyboard: [] }
+        );
+      } catch (editErr) {
+        logger.warn(`Gagal update tombol reject topup (${orderId}): ${editErr.message}`);
+      }
+    }
+
     await ctx.answerCbQuery('Order berhasil ditolak.');
   } catch (error) {
     logger.error(`Callback reject topup gagal (${orderId}):`, error.message);
