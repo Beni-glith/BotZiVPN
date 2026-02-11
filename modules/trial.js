@@ -50,14 +50,16 @@ if (!/^[a-zA-Z0-9-]+$/.test(username)) {
       // Pesan untuk Telegram / Bot
       const msg = `${d.message}
 
-📘 *TUTORIAL PASANG ZIVPN*
-📂 Google Drive:
-https://drive.google.com/file/d/1BAPWA4ejDsq0IcXxJt72GfjD4224iDpI/view?usp=sharing
+📘 *TUTORIAL PASANG ZIVPN* 📲✨
+🔗 https://t.me/ARSIPKACER/2
 
-📌 *Langkah Singkat:*
-1️⃣ Buka link di atas  
-2️⃣ Ikuti panduan di dalam video
-3️⃣ Selesai & Connect 🚀  
+📥 *APK ZIVPN* 🚀
+🔗 https://play.google.com/store/apps/details?id=com.zi.zivpn
+
+🔐 *APK CMFA* 🛡️
+🔗 https://t.me/ARSIPKACER/3
+
+Selamat mencoba! 🎉     
 `;
 
         return resolve(msg);
