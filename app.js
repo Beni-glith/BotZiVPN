@@ -106,7 +106,7 @@ const vars = JSON.parse(fs.readFileSync('./.vars.json', 'utf8'));
 const BOT_TOKEN = vars.BOT_TOKEN;
 const port = vars.PORT || 6969;
 const ADMIN = vars.USER_ID; 
-const NAMA_STORE = vars.NAMA_STORE || '@ARI_VPN_STORE';
+const NAMA_STORE = vars.NAMA_STORE || 'KACER_STORE';
 const DATA_QRIS = vars.DATA_QRIS;
 const GROUP_ID = vars.GROUP_ID;
 const APIKEY = vars.auth_paymet_getway;       // apikey gateway
@@ -115,7 +115,7 @@ const AUTH_TOKEN = vars.auth_token_mutasi;    // token orderkuota
 const WEB_MUTASI = vars.web_mutasi;           // https://app.orderkuota.com/api/v2/qris/mutasi/ACCOUNT_ID
 
 const bot = new Telegraf(BOT_TOKEN);
-let ADMIN_USERNAME = '@ARI_VPN_STORE';
+let ADMIN_USERNAME = '@one_zero2';
 const adminIds = ADMIN;
 logger.info('Bot initialized');
 
