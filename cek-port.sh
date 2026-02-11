@@ -2,22 +2,18 @@
 
 # URUTAN TAMPILAN (ini yang menentukan urutan)
 server_order=(
-  "Rumahweb"
-  "ID-BIZNET-2"
-  "ID-BIZNET-3"
-  "ID-BIZNET-4"
-  "ID-BIZNET-5"
-  "ID-IKD-1"
+  "RUMAHWEB"
+  "ID-BIZNET-1"
+  "ID-BIZNET-VIP"
+  "SG-NEWMEDIA-1"
 )
 
 # Alias => domain (domain tidak ditampilkan)
 declare -A servers=(
-  ["Rumahweb"]="rw.kacerteam.cloud"
-  ["ID-BIZNET-2"]="biznet2.rajaserverpremium.web.id"
-  ["ID-BIZNET-3"]="biznet3.rajaserverpremium.web.id"
-  ["ID-BIZNET-4"]="biznet4.rajaserverpremium.web.id"
-  ["ID-BIZNET-5"]="biznet5.rajaserverpremium.web.id"
-  ["ID-IKD-1"]="ikd.rajaserverpremium.web.id"
+  ["RUMAHWEB"]="rw.kacerteam.cloud"
+  ["ID-BIZNET-1"]="server1.kacerteam.cloud"
+  ["ID-BIZNET-VIP"]="server-vip.kacerteam.cloud"
+  ["SG-NEWMEDIA"]="sg.kacerteam.cloud"
 )
 
 # Port + label
