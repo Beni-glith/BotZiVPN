@@ -152,6 +152,7 @@ db.run(`CREATE TABLE IF NOT EXISTS pending_deposits (
 db.run(`CREATE TABLE IF NOT EXISTS topup_orders (
   order_id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
+  username TEXT,
   nominal_input INTEGER NOT NULL,
   unique_add INTEGER NOT NULL,
   nominal_final INTEGER NOT NULL,
@@ -166,6 +167,17 @@ db.run(`CREATE TABLE IF NOT EXISTS topup_orders (
     logger.error('Kesalahan membuat tabel topup_orders:', err.message);
   }
 });
+
+db.run(
+  `ALTER TABLE topup_orders ADD COLUMN username TEXT`,
+  (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      logger.error('Gagal menambahkan kolom username di topup_orders:', err.message);
+    } else if (!err) {
+      logger.info('Kolom username berhasil ditambahkan ke topup_orders');
+    }
+  }
+);
 
 db.run(`CREATE TABLE IF NOT EXISTS Server (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1043,6 +1055,9 @@ async function sendAdminMenu(ctx) {
     [
       { text: '💵 Tambah Saldo', callback_data: 'addsaldo_user' },
       { text: '📋 List Server', callback_data: 'listserver' }
+    ],
+    [
+      { text: '📋 Pending TopUp', callback_data: 'pending_topup_admin' }
     ],
    [
     { text: '💳 Lihat Saldo User', callback_data: 'cek_saldo_user'},
@@ -2832,6 +2847,21 @@ bot.action('nama_server_edit', async (ctx) => {
   }
 });
 
+bot.action('pending_topup_admin', async (ctx) => {
+  if (!isAdminUser(ctx.from.id)) {
+    await ctx.answerCbQuery('Tidak ada izin.', { show_alert: true });
+    return;
+  }
+
+  try {
+    await sendPendingTopupList(ctx);
+    await ctx.answerCbQuery('Daftar pending top up dikirim.');
+  } catch (error) {
+    logger.error('Gagal menampilkan daftar pending top up dari menu admin:', error.message);
+    await ctx.answerCbQuery('Gagal menampilkan daftar pending top up.', { show_alert: true });
+  }
+});
+
 bot.action('topup_saldo', async (ctx) => {
   try {
     await ctx.answerCbQuery();
@@ -3314,15 +3344,16 @@ async function generateUniqueAmount(nominalInput) {
 
 async function createTopupOrder(ctx, nominalInput) {
   const userId = ctx.from.id;
+  const username = ctx.from.username || ctx.from.first_name || '-';
   const { uniqueAdd, nominalFinal } = await generateUniqueAmount(nominalInput);
   const orderId = `TU-${Date.now()}-${Math.floor(Math.random() * 9000) + 1000}`;
   const createdAt = Date.now();
 
   await dbRun(
     `INSERT INTO topup_orders
-    (order_id, user_id, nominal_input, unique_add, nominal_final, status, created_at)
-    VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`,
-    [orderId, userId, nominalInput, uniqueAdd, nominalFinal, createdAt]
+    (order_id, user_id, username, nominal_input, unique_add, nominal_final, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+    [orderId, userId, username, nominalInput, uniqueAdd, nominalFinal, createdAt]
   );
 
   const qrisPath = getQrisPath();
@@ -3609,11 +3640,9 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-bot.command('pendingtopup', async (ctx) => {
-  if (!isAdminUser(ctx.from.id)) return;
-
+async function sendPendingTopupList(ctx) {
   const rows = await dbAll(
-    `SELECT order_id, user_id, nominal_input, nominal_final, status, created_at, proof_url
+    `SELECT order_id, user_id, username, nominal_final, status, created_at, proof_url
      FROM topup_orders
      WHERE UPPER(status) = 'PENDING'
      ORDER BY created_at DESC
@@ -3625,30 +3654,44 @@ bot.command('pendingtopup', async (ctx) => {
     return;
   }
 
-  await ctx.reply(`📋 Ditemukan ${rows.length} top up pending.`);
+  await ctx.reply(`📋 Ditemukan ${rows.length} top up pending terbaru.`);
 
   for (const row of rows) {
+    const safeUsername = row.username || '-';
     const text =
-      `Order: ${row.order_id}
-` +
-      `User: ${row.user_id}
-` +
-      `Nominal input: Rp ${Number(row.nominal_input).toLocaleString('id-ID')}
+      `Order ID: ${row.order_id}
 ` +
       `Nominal final: Rp ${Number(row.nominal_final).toLocaleString('id-ID')}
 ` +
-      `Waktu: ${new Date(row.created_at).toLocaleString('id-ID')}
+      `Waktu order: ${new Date(row.created_at).toLocaleString('id-ID')}
 ` +
-      `Status: ${row.status}`;
+      `User ID: ${row.user_id}
+` +
+      `Username: ${safeUsername}
+` +
+      `Status: ${row.status}
+
+` +
+      `Approve: /approve ${row.order_id}
+` +
+      `Reject: /reject ${row.order_id} <alasan>`;
 
     await ctx.reply(text, {
       reply_markup: { inline_keyboard: buildTopupAdminKeyboard(row.order_id, Boolean(row.proof_url)) }
     });
   }
+}
+
+bot.command('pendingtopup', async (ctx) => {
+  if (!isAdminUser(ctx.from.id)) return;
+
+  try {
+    await sendPendingTopupList(ctx);
+  } catch (error) {
+    logger.error('Admin /pendingtopup gagal:', error.message);
+    await ctx.reply('Gagal menampilkan daftar pending top up.');
+  }
 });
-
-
-
 
 bot.command('approve', async (ctx) => {
   if (!isAdminUser(ctx.from.id)) return;
@@ -3669,7 +3712,7 @@ bot.command('reject', async (ctx) => {
   if (!isAdminUser(ctx.from.id)) return;
   const parts = (ctx.message.text || '').trim().split(/\s+/);
   if (parts.length < 2) {
-    await ctx.reply('Gunakan: /reject {order_id} {alasan}');
+    await ctx.reply('Gunakan: /reject {order_id} {alasan_optional}');
     return;
   }
   const orderId = parts[1];
