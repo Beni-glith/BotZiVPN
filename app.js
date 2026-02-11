@@ -3235,6 +3235,38 @@ function isAdminUser(userId) {
   return Array.isArray(adminIds) ? adminIds.includes(userId) : String(adminIds) === String(userId);
 }
 
+function getAdminChatIds() {
+  if (Array.isArray(adminIds)) {
+    return adminIds.filter(Boolean);
+  }
+
+  if (typeof adminIds === 'string' && adminIds.includes(',')) {
+    return adminIds
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+  }
+
+  return adminIds ? [adminIds] : [];
+}
+
+function normalizeTopupStatus(status) {
+  return String(status || '').toUpperCase();
+}
+
+function buildTopupAdminKeyboard(orderId, withViewProof = false) {
+  const keyboard = [[
+    { text: '✅ Approve', callback_data: `topup_approve_${orderId}` },
+    { text: '❌ Reject', callback_data: `topup_reject_${orderId}` }
+  ]];
+
+  if (withViewProof) {
+    keyboard.push([{ text: '🖼️ Lihat Bukti', callback_data: `topup_viewproof_${orderId}` }]);
+  }
+
+  return keyboard;
+}
+
 function getQrisPath() {
   const candidates = [QRIS_FILENAME, 'qris.jpg', 'qris.png'];
   for (const fileName of candidates) {
@@ -3345,20 +3377,41 @@ async function handleProofUpload(ctx) {
   await ctx.reply('Bukti pembayaran diterima. Top up diproses manual (menunggu verifikasi admin).');
 
   try {
-    await bot.telegram.sendMessage(
-      Array.isArray(adminIds) ? adminIds[0] : adminIds,
+    const adminChatIds = getAdminChatIds();
+    const userLabel = ctx.from.username ? `@${ctx.from.username}` : '-';
+    const caption =
       `📥 Bukti top up baru
-Order: ${order.order_id}
-User: ${order.user_id}
-Nominal input: Rp ${Number(order.nominal_input).toLocaleString('id-ID')}
-Nominal final: Rp ${Number(order.nominal_final).toLocaleString('id-ID')}
-Status: ${order.status}
-Catatan: ${note || '-'}
+` +
+      `Order ID: ${order.order_id}
+` +
+      `User ID: ${order.user_id}
+` +
+      `Username: ${userLabel}
+` +
+      `Nominal input: Rp ${Number(order.nominal_input).toLocaleString('id-ID')}
+` +
+      `Nominal final: Rp ${Number(order.nominal_final).toLocaleString('id-ID')}
+` +
+      `Waktu order: ${new Date(order.created_at).toLocaleString('id-ID')}
+` +
+      `Waktu upload bukti: ${new Date().toLocaleString('id-ID')}
+` +
+      `Catatan: ${note || '-'}
+` +
+      `Status: ${order.status}`;
 
-Gunakan: approve ${order.order_id} atau reject ${order.order_id} <alasan>`
-    );
+    for (const adminChatId of adminChatIds) {
+      await bot.telegram.sendPhoto(
+        adminChatId,
+        photo.file_id,
+        {
+          caption,
+          reply_markup: { inline_keyboard: buildTopupAdminKeyboard(order.order_id) }
+        }
+      );
+    }
   } catch (err) {
-    logger.error('Gagal kirim notifikasi bukti ke admin:', err.message);
+    logger.error('Gagal kirim bukti top up ke admin:', err.message);
   }
 
   delete userState[ctx.chat.id];
@@ -3368,34 +3421,38 @@ async function adminApprove(ctx, orderId) {
   const order = await dbGet(`SELECT * FROM topup_orders WHERE order_id = ?`, [orderId]);
   if (!order) {
     await ctx.reply('Order tidak ditemukan.');
-    return;
+    return false;
   }
-  if (order.status !== 'PENDING') {
+
+  if (normalizeTopupStatus(order.status) !== 'PENDING') {
     await ctx.reply(`Order ${orderId} sudah berstatus ${order.status}.`);
-    return;
+    return false;
   }
 
   await dbRun('BEGIN TRANSACTION');
   try {
     await dbRun('INSERT OR IGNORE INTO users (user_id, saldo) VALUES (?, 0)', [order.user_id]);
-    await dbRun('UPDATE users SET saldo = saldo + ? WHERE user_id = ?', [order.nominal_input, order.user_id]);
+    await dbRun('UPDATE users SET saldo = saldo + ? WHERE user_id = ?', [order.nominal_final, order.user_id]);
     await dbRun("UPDATE topup_orders SET status = 'APPROVED' WHERE order_id = ?", [orderId]);
     await dbRun(
       `INSERT INTO transactions (user_id, amount, type, reference_id, timestamp) VALUES (?, ?, 'deposit', ?, ?)`,
-      [order.user_id, order.nominal_input, orderId, Date.now()]
+      [order.user_id, order.nominal_final, orderId, Date.now()]
     );
     await dbRun('COMMIT');
   } catch (err) {
     await dbRun('ROLLBACK');
+    logger.error(`Approve topup gagal untuk ${orderId}:`, err.message);
     throw err;
   }
 
-  await ctx.reply(`✅ Order ${orderId} di-approve. Saldo user bertambah Rp ${Number(order.nominal_input).toLocaleString('id-ID')}.`);
+  await ctx.reply(`✅ Order ${orderId} di-approve. Saldo user bertambah Rp ${Number(order.nominal_final).toLocaleString('id-ID')}.`);
   try {
-    await bot.telegram.sendMessage(order.user_id, `✅ Top up kamu di-approve. Saldo masuk Rp ${Number(order.nominal_input).toLocaleString('id-ID')}.`);
+    await bot.telegram.sendMessage(order.user_id, `✅ Top up kamu disetujui admin. Saldo masuk Rp ${Number(order.nominal_final).toLocaleString('id-ID')}.`);
   } catch (err) {
     logger.error('Gagal kirim notif approve ke user:', err.message);
   }
+
+  return true;
 }
 
 async function adminReject(ctx, orderId, reason) {
@@ -3404,7 +3461,7 @@ async function adminReject(ctx, orderId, reason) {
     await ctx.reply('Order tidak ditemukan.');
     return;
   }
-  if (order.status !== 'PENDING') {
+  if (normalizeTopupStatus(order.status) !== 'PENDING') {
     await ctx.reply(`Order ${orderId} sudah berstatus ${order.status}.`);
     return;
   }
@@ -3422,6 +3479,70 @@ async function adminReject(ctx, orderId, reason) {
   }
 }
 
+bot.action(/^topup_approve_(.+)$/, async (ctx) => {
+  if (!isAdminUser(ctx.from.id)) {
+    await ctx.answerCbQuery('Tidak ada izin.', { show_alert: true });
+    return;
+  }
+
+  const orderId = ctx.match[1];
+  try {
+    await adminApprove(ctx, orderId);
+    await ctx.answerCbQuery('Order berhasil di-approve.');
+  } catch (error) {
+    logger.error(`Callback approve topup gagal (${orderId}):`, error.message);
+    await ctx.answerCbQuery('Gagal approve order.', { show_alert: true });
+  }
+});
+
+bot.action(/^topup_reject_(.+)$/, async (ctx) => {
+  if (!isAdminUser(ctx.from.id)) {
+    await ctx.answerCbQuery('Tidak ada izin.', { show_alert: true });
+    return;
+  }
+
+  const orderId = ctx.match[1];
+  try {
+    await adminReject(ctx, orderId, 'Ditolak admin');
+    await ctx.answerCbQuery('Order berhasil ditolak.');
+  } catch (error) {
+    logger.error(`Callback reject topup gagal (${orderId}):`, error.message);
+    await ctx.answerCbQuery('Gagal reject order.', { show_alert: true });
+  }
+});
+
+bot.action(/^topup_viewproof_(.+)$/, async (ctx) => {
+  if (!isAdminUser(ctx.from.id)) {
+    await ctx.answerCbQuery('Tidak ada izin.', { show_alert: true });
+    return;
+  }
+
+  const orderId = ctx.match[1];
+  try {
+    const order = await dbGet('SELECT order_id, user_id, proof_url, status FROM topup_orders WHERE order_id = ?', [orderId]);
+    if (!order) {
+      await ctx.answerCbQuery('Order tidak ditemukan.', { show_alert: true });
+      return;
+    }
+
+    if (!order.proof_url) {
+      await ctx.answerCbQuery('Bukti tidak tersedia.', { show_alert: true });
+      return;
+    }
+
+    await ctx.replyWithPhoto(order.proof_url, {
+      caption: `Bukti topup ${order.order_id}
+User: ${order.user_id}
+Status: ${order.status}`,
+      reply_markup: { inline_keyboard: buildTopupAdminKeyboard(order.order_id) }
+    });
+    await ctx.answerCbQuery('Bukti ditampilkan.');
+  } catch (error) {
+    logger.error(`Lihat bukti topup gagal (${orderId}):`, error.message);
+    await ctx.answerCbQuery('Gagal menampilkan bukti.', { show_alert: true });
+  }
+});
+
 bot.on('photo', async (ctx) => {
   try {
     await handleProofUpload(ctx);
@@ -3435,31 +3556,41 @@ bot.command('pendingtopup', async (ctx) => {
   if (!isAdminUser(ctx.from.id)) return;
 
   const rows = await dbAll(
-    `SELECT order_id, user_id, nominal_input, nominal_final, status, created_at, proof_message_id, proof_path, proof_url
+    `SELECT order_id, user_id, nominal_input, nominal_final, status, created_at, proof_url
      FROM topup_orders
-     WHERE status = 'PENDING'
-     ORDER BY created_at DESC`
+     WHERE UPPER(status) = 'PENDING'
+     ORDER BY created_at DESC
+     LIMIT 20`
   );
 
   if (!rows.length) {
-    await ctx.reply('Tidak ada order top up PENDING.');
+    await ctx.reply('Tidak ada order top up pending.');
     return;
   }
 
-  const text = rows.slice(0, 20).map((row, idx) => (
-    `${idx + 1}. ${row.order_id}\n` +
-    `User: ${row.user_id}\n` +
-    `Nominal Input: Rp ${Number(row.nominal_input).toLocaleString('id-ID')}\n` +
-    `Nominal Final: Rp ${Number(row.nominal_final).toLocaleString('id-ID')}\n` +
-    `Waktu: ${new Date(row.created_at).toLocaleString('id-ID')}\n` +
-    `Status: ${row.status}\n` +
-    `Bukti Msg ID: ${row.proof_message_id || '-'}\n` +
-    `Bukti Path/Catatan: ${row.proof_path || '-'}\n` +
-    `Bukti URL/FileID: ${row.proof_url || '-'}`
-  )).join('\n\n');
+  await ctx.reply(`📋 Ditemukan ${rows.length} top up pending.`);
 
-  await ctx.reply(text);
+  for (const row of rows) {
+    const text =
+      `Order: ${row.order_id}
+` +
+      `User: ${row.user_id}
+` +
+      `Nominal input: Rp ${Number(row.nominal_input).toLocaleString('id-ID')}
+` +
+      `Nominal final: Rp ${Number(row.nominal_final).toLocaleString('id-ID')}
+` +
+      `Waktu: ${new Date(row.created_at).toLocaleString('id-ID')}
+` +
+      `Status: ${row.status}`;
+
+    await ctx.reply(text, {
+      reply_markup: { inline_keyboard: buildTopupAdminKeyboard(row.order_id, Boolean(row.proof_url)) }
+    });
+  }
 });
+
+
 
 
 bot.command('approve', async (ctx) => {
@@ -3513,6 +3644,73 @@ bot.hears(/^reject\s+(\S+)(?:\s+(.+))?$/i, async (ctx) => {
     await ctx.reply('Gagal reject order.');
   }
 });
+
+function keyboard_abc() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  const buttons = [];
+  for (let i = 0; i < alphabet.length; i += 3) {
+    const row = alphabet.slice(i, i + 3).split('').map(char => ({
+      text: char,
+      callback_data: char
+    }));
+    buttons.push(row);
+  }
+  buttons.push([
+    { text: '🔙 Hapus', callback_data: 'delete' },
+    { text: '✅ Konfirmasi', callback_data: 'confirm' }
+  ]);
+  buttons.push([{ text: '🔙 Kembali ke Menu Utama', callback_data: 'send_main_menu' }]);
+  return buttons;
+}
+
+function keyboard_nomor() {
+  const alphabet = '1234567890';
+  const buttons = [];
+  for (let i = 0; i < alphabet.length; i += 3) {
+    const row = alphabet.slice(i, i + 3).split('').map(char => ({
+      text: char,
+      callback_data: char
+    }));
+    buttons.push(row);
+  }
+  buttons.push([
+    { text: '🔙 Hapus', callback_data: 'delete' },
+    { text: '✅ Konfirmasi', callback_data: 'confirm' }
+  ]);
+  buttons.push([{ text: '🔙 Kembali ke Menu Utama', callback_data: 'send_main_menu' }]);
+  return buttons;
+}
+
+function keyboard_full() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const buttons = [];
+  for (let i = 0; i < alphabet.length; i += 3) {
+    const row = alphabet.slice(i, i + 3).split('').map(char => ({
+      text: char,
+      callback_data: char
+    }));
+    buttons.push(row);
+  }
+  buttons.push([
+    { text: '🔙 Hapus', callback_data: 'delete' },
+    { text: '✅ Konfirmasi', callback_data: 'confirm' }
+  ]);
+  buttons.push([{ text: '🔙 Kembali ke Menu Utama', callback_data: 'send_main_menu' }]);
+  return buttons;
+}
+
+async function updateUserBalance(userId, amount) {
+  return new Promise((resolve, reject) => {
+    db.run('UPDATE users SET saldo = saldo + ? WHERE user_id = ?', [amount, userId], function(err) {
+      if (err) {
+        logger.error('⚠️ Kesalahan saat mengupdate saldo user:', err.message);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
 
 async function recordAccountTransaction(userId, type) {
   return new Promise((resolve, reject) => {
