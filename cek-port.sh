@@ -2,7 +2,7 @@
 
 # URUTAN TAMPILAN (ini yang menentukan urutan)
 server_order=(
-  "ID-BIZNET-1"
+  "Rumahweb"
   "ID-BIZNET-2"
   "ID-BIZNET-3"
   "ID-BIZNET-4"
@@ -12,7 +12,7 @@ server_order=(
 
 # Alias => domain (domain tidak ditampilkan)
 declare -A servers=(
-  ["ID-BIZNET-1"]="biznet.rajaserverpremium.web.id"
+  ["Rumahweb"]="rw.kacerteam.cloud"
   ["ID-BIZNET-2"]="biznet2.rajaserverpremium.web.id"
   ["ID-BIZNET-3"]="biznet3.rajaserverpremium.web.id"
   ["ID-BIZNET-4"]="biznet4.rajaserverpremium.web.id"
